@@ -54,6 +54,15 @@ impl_from_file!(u8, (), (), f, {
 	}
 });
 
+fn array_from_file<F, T, I, O>(f: &mut F, count: usize)->Result<Box<[T]>, FromFileErr<I, O>> where
+	F: Read,
+	F: Seek,
+	T: FromFile<I, O>,
+{
+	let mut rec = Vec::with_capacity(count);
+	for _ in 0..count{rec.push(unwrap_or_ret!(T::from_file(f)))}
+	Ok(rec.into())
+}
 #[derive(Debug)]
 pub struct OTTF{
 	pub table_directory: TableDirectory,
@@ -98,11 +107,7 @@ impl_from_file!(TableDirectory, (), (), f, {
 		search_range: unwrap_or_ret!(u16::from_file(f)),
 		entry_selector: unwrap_or_ret!(u16::from_file(f)),
 		range_shift: unwrap_or_ret!(u16::from_file(f)),
-		table_records: {
-			let mut rec = vec![];
-			for _ in 0..num_tables{rec.push(unwrap_or_ret!(TableRecord::from_file(f)))}
-			rec.into()
-		},
+		table_records: unwrap_or_ret!(array_from_file(f, num_tables as usize)),
 	});
 });
 
@@ -180,6 +185,7 @@ pub struct NameTable{
 	pub count: u16,
 	///Offset to start of string storage (from start of table).
 	pub storage_offset: Offset16,
+	storage_absolute: u64,
 	///The name records where count is the number of records.
 	pub name_records: Box<[NameRecord]>,
 	///Version (=1) Number of language-tag records.
@@ -188,26 +194,23 @@ pub struct NameTable{
 	pub lang_tag_record: Option<Box<[LangTagRecord]>>,
 }
 impl_from_file!(NameTable, (), (), f, {
+	let start = f.seek(SeekFrom::Current(0)).unwrap();
 	let version = unwrap_or_ret!(u16::from_file(f));
 	let count = unwrap_or_ret!(u16::from_file(f));
 	let storage_offset = unwrap_or_ret!(Offset16::from_file(f));
-	let name_records = {
-		let mut rec = vec![];
-		for _ in 0..count{rec.push(unwrap_or_ret!(NameRecord::from_file(f)))}
-		rec.into()
-	};
+	let name_records = unwrap_or_ret!(array_from_file(f, count as usize));
 	let lang_tag_count = if version == 0{None}else{Some(unwrap_or_ret!(u16::from_file(f)))};
 	return Ok(Self{
 		version,
 		count,
 		storage_offset,
+		storage_absolute: start + (storage_offset as u64),
 		name_records,
 		lang_tag_count,
-		lang_tag_record: match lang_tag_count{Some(lang_tag_count)=>{
-			let mut rec = vec![];
-			for _ in 0..lang_tag_count{rec.push(unwrap_or_ret!(LangTagRecord::from_file(f)))}
-			Some(rec.into())
-		},None=>None},
+		lang_tag_record: match lang_tag_count{
+			Some(count)=>{Some(unwrap_or_ret!(array_from_file(f, count as usize)))},
+			None=>None
+		},
 	});
 });
 #[derive(Debug)]
