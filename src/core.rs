@@ -6,12 +6,17 @@ pub enum FromFileErr<InvalidData,OtherType>{
 	InvalidData(InvalidData),
 	Other(OtherType)
 }
-macro_rules! from_file_def {($f: ident, $body: block) => {
-	fn from_file<F>($f: &mut F)->Result<Self, FromFileErr<InvalidData,OtherType>> where
-		Self: Sized,
-		F: Read,
-		F: Seek
-	$body
+macro_rules! impl_from_file {($type: ty, $invalid_data: ty, $other_type: ty, $f: ident, $body: block) => {
+	impl FromFile<$invalid_data,$other_type> for $type{
+		fn from_file<F>($f: &mut F)->Result<
+			Self,
+			FromFileErr<$invalid_data,$other_type>
+		> where
+			Self: Sized,
+			F: Read,
+			F: Seek
+		$body
+	}
 };}
 pub trait FromFile<InvalidData,OtherType>{
 	fn from_file<F>(f: &mut F)->Result<Self, FromFileErr<InvalidData,OtherType>> where
@@ -31,13 +36,13 @@ macro_rules! val_or_ret {($val: expr, $validator: expr, $on_err: expr) => {{
 	if $validator(v){v}else{return Err(FromFileErr::InvalidData($on_err))}
 }};}
 
-impl FromFile<(),()> for u32{from_file_def!(f, {
+impl_from_file!(u32, (), (), f, {
 	Ok((unwrap_or_ret!(u16::from_file(f)) as u32) << 16 | unwrap_or_ret!(u16::from_file(f)) as u32)
-});}
-impl FromFile<(),()> for u16{from_file_def!(f, {
+});
+impl_from_file!(u16, (), (), f, {
 	Ok((unwrap_or_ret!(u8::from_file(f)) as u16) << 8 | unwrap_or_ret!(u8::from_file(f)) as u16)
-});}
-impl FromFile<(),()> for u8{from_file_def!(f, {
+});
+impl_from_file!(u8, (), (), f, {
 	let mut buf = [0u8];
 	match f.read(buf.as_mut_slice()){
 		Ok(1) => Ok(buf[0]),
@@ -45,18 +50,17 @@ impl FromFile<(),()> for u8{from_file_def!(f, {
 		Ok(_) => unreachable!(),
 		Err(e) => {
 			panic!("{}",e);
-			Err(FromFileErr::Other(()))
 		}
 	}
-});}
+});
 
 #[derive(Debug)]
 pub struct OTTF{
 	pub table_directory: TableDirectory,
 }
-impl FromFile<(),()> for OTTF{from_file_def!(f, {Ok(Self{
+impl_from_file!(OTTF, (), (), f, {Ok(Self{
 	table_directory: unwrap_or_ret!(TableDirectory::from_file(f)),
-})});}
+})});
 
 #[derive(Debug)]
 pub enum SFNTVer{
@@ -85,7 +89,7 @@ pub struct TableDirectory{
 	/// this should have the count of num_tables
 	pub table_records: Box<[TableRecord]>,
 }
-impl FromFile<(),()> for TableDirectory{from_file_def!(f, {
+impl_from_file!(TableDirectory, (), (), f, {
 	let sfnt_version = SFNTVer::from_u32(unwrap_or_ret!(u32::from_file(f)));
 	let num_tables = unwrap_or_ret!(u16::from_file(f));
 	return Ok(Self{
@@ -100,7 +104,7 @@ impl FromFile<(),()> for TableDirectory{from_file_def!(f, {
 			rec.into()
 		},
 	});
-});}
+});
 
 #[derive(Debug)]
 pub struct TableRecord{
@@ -110,13 +114,13 @@ pub struct TableRecord{
 	pub length: u32,
 	cached_table: Option<Result<Box<Table>, FromFileErr<(),Box<[u8]>>>>,
 }
-impl FromFile<(),()> for TableRecord{from_file_def!(f, {Ok(Self{
+impl_from_file!(TableRecord, (), (), f, {Ok(Self{
 	table_tag: unwrap_or_ret!(Tag::from_file(f)),
 	checksum: unwrap_or_ret!(u32::from_file(f)),
 	offset: unwrap_or_ret!(Offset32::from_file(f)),
 	length: unwrap_or_ret!(u32::from_file(f)),
 	cached_table: None,
-})});}
+})});
 impl TableRecord{
 	pub fn get_table<T>(&mut self, f: &mut T)->&Result<Box<Table>, FromFileErr<(),Box<[u8]>>> where T:Read, T:Seek{
 		if self.cached_table.is_none(){
@@ -145,7 +149,7 @@ impl TableRecord{
 pub struct Tag{
 	pub data: String,
 }
-impl FromFile<(),()> for Tag{from_file_def!(f, {
+impl_from_file!(Tag, (), (), f, {
 	let in_range = |chr: u8|{chr>=0x20&&chr<=0x7E};
 	Ok(Self{data: String::from_iter([
 		char::from(val_or_ret!(unwrap_or_ret!(u8::from_file(f)), in_range, ())),
@@ -153,7 +157,7 @@ impl FromFile<(),()> for Tag{from_file_def!(f, {
 		char::from(val_or_ret!(unwrap_or_ret!(u8::from_file(f)), in_range, ())),
 		char::from(val_or_ret!(unwrap_or_ret!(u8::from_file(f)), in_range, ())),
 	])})
-});}
+});
 
 type Offset32 = u32;
 type Offset16 = u16;
@@ -172,7 +176,7 @@ pub struct NameTable{
 	pub lang_tag_count: Option<u16>,
 	pub lang_tag_record: Option<Box<[LangTagRecord]>>,
 }
-impl FromFile<(),()> for NameTable{from_file_def!(f, {
+impl_from_file!(NameTable, (), (), f, {
 	let version = unwrap_or_ret!(u16::from_file(f));
 	let count = unwrap_or_ret!(u16::from_file(f));
 	let storage_offset = unwrap_or_ret!(Offset16::from_file(f));
@@ -194,7 +198,7 @@ impl FromFile<(),()> for NameTable{from_file_def!(f, {
 			Some(rec.into())
 		},None=>None},
 	});
-});}
+});
 #[derive(Debug)]
 pub struct LangTagRecord{
 	///Language-tag string length (in bytes)
@@ -202,10 +206,10 @@ pub struct LangTagRecord{
 	///Language-tag string offset from start of storage area (in bytes).
 	pub lang_tag_offset: Offset16,
 }
-impl FromFile<(),()> for LangTagRecord{from_file_def!(f, {Ok(Self{
+impl_from_file!(LangTagRecord, (), (), f, {Ok(Self{
 	length: unwrap_or_ret!(u16::from_file(f)),
 	lang_tag_offset: unwrap_or_ret!(Offset16::from_file(f)),
-})});}
+})});
 #[derive(Debug)]
 pub struct NameRecord{
 	///Platform ID.
@@ -221,14 +225,14 @@ pub struct NameRecord{
 	///String offset from start of storage area (in bytes).
 	pub string_offset: Offset16,
 }
-impl FromFile<(),()> for NameRecord{from_file_def!(f, {Ok(Self{
+impl_from_file!(NameRecord, (), (), f, {Ok(Self{
 	platform_id: unwrap_or_ret!(u16::from_file(f)),
 	encoding_id: unwrap_or_ret!(u16::from_file(f)),
 	language_id: unwrap_or_ret!(u16::from_file(f)),
 	name_id: unwrap_or_ret!(u16::from_file(f)),
 	length: unwrap_or_ret!(u16::from_file(f)),
 	string_offset: unwrap_or_ret!(Offset16::from_file(f)),
-})});}
+})});
 
 pub fn calc_table_checksum<T>(table: T, length: u32) -> u32 where T: Fn(usize) -> u32{
 	let mut sum = 0u32;
