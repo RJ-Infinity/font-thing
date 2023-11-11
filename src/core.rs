@@ -108,9 +108,13 @@ impl_from_file!(TableDirectory, (), (), f, {
 
 #[derive(Debug)]
 pub struct TableRecord{
+	///Table identifier.
 	pub table_tag: Tag,
+	///Checksum for this table.
 	pub checksum: u32,
+	///Offset from beginning of font file.
 	pub offset: Offset32,
+	///Length of this table.
 	pub length: u32,
 	cached_table: Option<Result<Box<Table>, FromFileErr<(),Box<[u8]>>>>,
 }
@@ -145,6 +149,7 @@ impl TableRecord{
 	}
 }
 
+///Array of four uint8s (length = 32 bits) used to identify a table, design-variation axis, script, language system, feature, or baseline
 #[derive(Debug)]
 pub struct Tag{
 	pub data: String,
@@ -169,11 +174,17 @@ pub enum Table{
 
 #[derive(Debug)]
 pub struct NameTable{
+	///Table version number 
 	pub version: u16,
+	///Number of name records.
 	pub count: u16,
+	///Offset to start of string storage (from start of table).
 	pub storage_offset: Offset16,
+	///The name records where count is the number of records.
 	pub name_records: Box<[NameRecord]>,
+	///Version (=1) Number of language-tag records.
 	pub lang_tag_count: Option<u16>,
+	///Version (=1) The language-tag records where langTagCount is the number of records.
 	pub lang_tag_record: Option<Box<[LangTagRecord]>>,
 }
 impl_from_file!(NameTable, (), (), f, {
