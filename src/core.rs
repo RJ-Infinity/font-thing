@@ -1,5 +1,7 @@
 use std::io::{Read, Seek, SeekFrom};
 
+use crate::char_sets::{MacOsRoman, Utf16, CharSetStr, Utf8, Utf16BMPOnly};
+
 #[derive(Debug)]
 pub enum FromFileErr<InvalidData,OtherType>{
 	EOF,
@@ -59,9 +61,9 @@ fn array_from_file<F, T, I, O>(f: &mut F, count: usize)->Result<Box<[T]>, FromFi
 	F: Seek,
 	T: FromFile<I, O>,
 {
-	let mut rec = Vec::with_capacity(count);
-	for _ in 0..count{rec.push(unwrap_or_ret!(T::from_file(f)))}
-	Ok(rec.into())
+	let mut buf = Vec::with_capacity(count);
+	for _ in 0..count{buf.push(unwrap_or_ret!(T::from_file(f)))}
+	Ok(buf.into())
 }
 #[derive(Debug)]
 pub struct OTTF{
@@ -243,6 +245,88 @@ impl_from_file!(NameRecord, (), (), f, {Ok(Self{
 	length: unwrap_or_ret!(u16::from_file(f)),
 	string_offset: unwrap_or_ret!(Offset16::from_file(f)),
 })});
+macro_rules! decode_string {($char_set: ty, $string :expr) => {
+		match CharSetStr::<$char_set>::from_bytes($string){
+			Ok(s)=>Ok(s.to_string()),
+			Err(_)=>Err("Invalid String".to_string()),
+		}
+	};}
+impl NameRecord{
+	pub fn get_string<F>(&self, f: &mut F, parent: &NameTable)->Result<Box<[u8]>,FromFileErr<(),()>> where F: Read, F: Seek{
+		let pos = f.seek(SeekFrom::Current(0)).unwrap();
+		if f.seek(SeekFrom::Start(parent.storage_absolute+self.string_offset as u64)).is_err()
+		{return Err(FromFileErr::EOF);}
+		let rv = array_from_file(f, self.length as usize);
+		
+		// this should never fail as we were at this position before running the function
+		let _ = f.seek(SeekFrom::Start(pos));
+		return rv;
+	}
+	
+	pub fn translate_string(&self, string: Box<[u8]>)->Result<String,String>{
+		match self.platform_id {
+			0 => match self.encoding_id{ // Unicode
+				0 => todo!("unicode 1.0 semantics"),
+				1 => todo!("unicode 1.1 semantics"),
+				2 => todo!("ISO/IEC 10646 semantics"),
+				3 => decode_string!(Utf16BMPOnly, &string),// Unicode 2.0 and onwards semantics Unicode BMP only
+				4 => decode_string!(Utf16, &string),// Unicode 2.0 and onwards semantics Unicode full repertoire
+				x => Err(format!("{} is an invalid Encoding ID for platform id 0",x)),
+			},
+			1 => match self.encoding_id{ // Macintosh
+				0 => decode_string!(MacOsRoman, &string), // Roman
+				1 => todo!("Japanese"),
+				2 => todo!("Chinese (Traditional)"),
+				3 => todo!("Korean"),
+				4 => todo!("Arabic"),
+				5 => todo!("Hebrew"),
+				6 => todo!("Greek"),
+				7 => todo!("Russian"),
+				8 => todo!("RSymbol"),
+				9 => todo!("Devanagari"),
+				10 => todo!("Gurmukhi"),
+				11 => todo!("Gujarati"),
+				12 => todo!("Odia"),
+				13 => todo!("Bangla"),
+				14 => todo!("Tamil"),
+				15 => todo!("Telugu"),
+				16 => todo!("Kannada"),
+				17 => todo!("Malayalam"),
+				18 => todo!("Sinhalese"),
+				19 => todo!("Burmese"),
+				20 => todo!("Khmer"),
+				21 => todo!("Thai"),
+				22 => todo!("Laotian"),
+				23 => todo!("Georgian"),
+				24 => todo!("Armenian"),
+				25 => todo!("Chinese (Simplified)"),
+				26 => todo!("Tibetan"),
+				27 => todo!("Mongolian"),
+				28 => todo!("Geez"),
+				29 => todo!("Slavic"),
+				30 => todo!("Vietnamese"),
+				31 => todo!("Sindhi"),
+				32 => todo!("Uninterpreted"),
+				x => Err(format!("{} is an invalid Encoding ID for platform id 1",x)),
+			},
+			3 => match self.encoding_id{ // Windows
+				0 => todo!("Symbol"),
+				1 => decode_string!(Utf16BMPOnly, &string),// Unicode BMP
+				2 => todo!("ShiftJIS"),
+				3 => todo!("PRC"),
+				4 => todo!("Big5"),
+				5 => todo!("Wansung"),
+				6 => todo!("Johab"),
+				7 => todo!("Reserved"),
+				8 => todo!("Reserved"),
+				9 => todo!("Reserved"),
+				10 => decode_string!(Utf8, &string),// Unicode full repertoire
+				x => Err(format!("{} is an invalid Encoding ID for platform id 2",x)),
+			},
+			x => Err(format!("{} is an invalid Platform ID", x)),
+		}
+	}
+}
 
 pub fn calc_table_checksum<T>(table: T, length: u32) -> u32 where T: Fn(usize) -> u32{
 	let mut sum = 0u32;
