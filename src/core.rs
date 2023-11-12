@@ -121,36 +121,32 @@ pub struct TableRecord{
 	pub offset: Offset32,
 	///Length of this table.
 	pub length: u32,
-	cached_table: Option<Result<Box<Table>, FromFileErr<(),Box<[u8]>>>>,
 }
 impl_from_file!(TableRecord, (), (), f, {Ok(Self{
 	table_tag: unwrap_or_ret!(Tag::from_file(f)),
 	checksum: unwrap_or_ret!(u32::from_file(f)),
 	offset: unwrap_or_ret!(Offset32::from_file(f)),
 	length: unwrap_or_ret!(u32::from_file(f)),
-	cached_table: None,
 })});
 impl TableRecord{
-	pub fn get_table<T>(&mut self, f: &mut T)->&Result<Box<Table>, FromFileErr<(),Box<[u8]>>> where T:Read, T:Seek{
-		if self.cached_table.is_none(){
-			let cur = f.seek(SeekFrom::Current(0));
-			if f.seek(SeekFrom::Start(self.offset as u64)).is_err()
-			{return &Err(FromFileErr::EOF);}
+	pub fn get_table<T>(&mut self, f: &mut T)->Result<Table, FromFileErr<(),Box<[u8]>>> where T:Read, T:Seek{
+		let cur = f.seek(SeekFrom::Current(0));
+		if f.seek(SeekFrom::Start(self.offset as u64)).is_err()
+		{return Err(FromFileErr::EOF);}
 
-			self.cached_table = Some(match self.table_tag.data.as_str(){
-				"name" => Ok(Table::Name(match NameTable::from_file(f){
-					Ok(v) => v,
-					Err(e) => match e{
-						FromFileErr::EOF => return &Err(FromFileErr::EOF),
-						FromFileErr::InvalidData(_) => return &Err(FromFileErr::InvalidData(())),
-						FromFileErr::Other(_) => unreachable!(),
-					},
-				}).into()),
-				_ => Err(FromFileErr::Other([].into())),
-			});
-			f.seek(SeekFrom::Start(cur.unwrap())).unwrap();
-		}
-		self.cached_table.as_ref().unwrap()
+		let rv = match self.table_tag.data.as_str(){
+			"name" => Ok(Table::Name(match NameTable::from_file(f){
+				Ok(v) => v,
+				Err(e) => match e{
+					FromFileErr::EOF => return Err(FromFileErr::EOF),
+					FromFileErr::InvalidData(_) => return Err(FromFileErr::InvalidData(())),
+					FromFileErr::Other(_) => unreachable!(),
+				},
+			}).into()),
+			_ => Err(FromFileErr::Other([].into())),
+		};
+		f.seek(SeekFrom::Start(cur.unwrap())).unwrap();
+		return rv;
 	}
 }
 
