@@ -3,31 +3,34 @@ pub mod char_sets;
 
 #[cfg(test)]
 mod tests {
-	use core::panic;
 	use std::fs::File;
-	use crate::{core::FromFile, char_sets::{CharSetStr, CodePage437, MacOsRoman, Utf16, Utf8}};
+	use crate::{core::FromFile, char_sets::{CharSetStr, CodePage437, Utf16}};
 
 	#[test]
 	fn test_stuff() {
 		let mut f = File::open("consola.ttf").unwrap();
 		let mut font = crate::core::OTTF::from_file(&mut f).unwrap();
 		let mut name = None;
+		println!("{:#?}",font.table_directory.table_records);
 		for r in (*font.table_directory.table_records).iter_mut(){
 			if r.table_tag.data.as_str() == "name"{
 				name = Some(r);
 			}
 		}
 		let name = name.unwrap();
-		match name.get_table(&mut f).unwrap(){crate::core::Table::Name(name_t) => {
-			for record in name_t.name_records.iter(){println!(
-				"{}@{}: {}",
-				record.length,
-				record.string_offset,
-				record.translate_string(
-					record.get_string(&mut f, &name_t).unwrap()
-				).unwrap()
-			);}
-		},}
+		match name.get_table(&mut f).unwrap(){
+			crate::core::Table::Name(name_t) => {
+				for record in name_t.name_records.iter(){println!(
+					"{}@{}: {}",
+					record.length,
+					record.string_offset,
+					record.translate_string(
+						record.get_string(&mut f, &name_t).unwrap()
+					).unwrap()
+				);}
+			},
+			crate::core::Table::DSIG(dsig_t) => {println!("{:#?}",dsig_t);}
+		}
 	}
 	#[test]
 	fn test_char_sets() {

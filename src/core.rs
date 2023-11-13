@@ -1,5 +1,7 @@
 use std::io::{Read, Seek, SeekFrom};
 
+use macros::FromFile;
+
 use crate::char_sets::{MacOsRoman, Utf16, CharSetStr, Utf8, Utf16BMPOnly};
 
 #[derive(Debug)]
@@ -65,13 +67,10 @@ fn array_from_file<F, T, I, O>(f: &mut F, count: usize)->Result<Box<[T]>, FromFi
 	for _ in 0..count{buf.push(unwrap_or_ret!(T::from_file(f)))}
 	Ok(buf.into())
 }
-#[derive(Debug)]
+#[derive(Debug,FromFile)]
 pub struct OTTF{
 	pub table_directory: TableDirectory,
 }
-impl_from_file!(OTTF, (), (), f, {Ok(Self{
-	table_directory: unwrap_or_ret!(TableDirectory::from_file(f)),
-})});
 
 #[derive(Debug)]
 pub enum SFNTVer{
@@ -84,8 +83,9 @@ impl SFNTVer{fn from_u32(v: u32)->Self{match v{
 	0x4F54544F => Self::CFF,
 	v => Self::Unknown(v),
 }}}
+impl_from_file!(SFNTVer, (), (), f, {Ok(SFNTVer::from_u32(unwrap_or_ret!(u32::from_file(f))))});
 
-#[derive(Debug)]
+#[derive(Debug,FromFile)]
 pub struct TableDirectory{
 	/// 0x00010000 or 0x4F54544F ('OTTO')
 	pub sfnt_version: SFNTVer,
@@ -98,22 +98,11 @@ pub struct TableDirectory{
 	/// numTables times 16, minus searchRange ((numTables * 16) - searchRange).
 	pub range_shift: u16,
 	/// this should have the count of num_tables
+	#[from_file_count(num_tables)]
 	pub table_records: Box<[TableRecord]>,
 }
-impl_from_file!(TableDirectory, (), (), f, {
-	let sfnt_version = SFNTVer::from_u32(unwrap_or_ret!(u32::from_file(f)));
-	let num_tables = unwrap_or_ret!(u16::from_file(f));
-	return Ok(Self{
-		sfnt_version,
-		num_tables,
-		search_range: unwrap_or_ret!(u16::from_file(f)),
-		entry_selector: unwrap_or_ret!(u16::from_file(f)),
-		range_shift: unwrap_or_ret!(u16::from_file(f)),
-		table_records: unwrap_or_ret!(array_from_file(f, num_tables as usize)),
-	});
-});
 
-#[derive(Debug)]
+#[derive(Debug,FromFile)]
 pub struct TableRecord{
 	///Table identifier.
 	pub table_tag: Tag,
@@ -124,12 +113,17 @@ pub struct TableRecord{
 	///Length of this table.
 	pub length: u32,
 }
-impl_from_file!(TableRecord, (), (), f, {Ok(Self{
-	table_tag: unwrap_or_ret!(Tag::from_file(f)),
-	checksum: unwrap_or_ret!(u32::from_file(f)),
-	offset: unwrap_or_ret!(Offset32::from_file(f)),
-	length: unwrap_or_ret!(u32::from_file(f)),
-})});
+
+macro_rules! get_table{($table: expr, $table_type: ty, $f: ident) => {
+	Ok($table(match <$table_type>::from_file($f){
+		Ok(v) => v,
+		Err(e) => match e{
+			FromFileErr::EOF => return Err(FromFileErr::EOF),
+			FromFileErr::InvalidData(_) => return Err(FromFileErr::InvalidData(())),
+			FromFileErr::Other(_) => unreachable!(),
+		},
+	}).into())
+};}
 impl TableRecord{
 	pub fn get_table<T>(&mut self, f: &mut T)->Result<Table, FromFileErr<(),Box<[u8]>>> where T:Read, T:Seek{
 		let cur = f.seek(SeekFrom::Current(0));
@@ -137,14 +131,8 @@ impl TableRecord{
 		{return Err(FromFileErr::EOF);}
 
 		let rv = match self.table_tag.data.as_str(){
-			"name" => Ok(Table::Name(match NameTable::from_file(f){
-				Ok(v) => v,
-				Err(e) => match e{
-					FromFileErr::EOF => return Err(FromFileErr::EOF),
-					FromFileErr::InvalidData(_) => return Err(FromFileErr::InvalidData(())),
-					FromFileErr::Other(_) => unreachable!(),
-				},
-			}).into()),
+			"DSIG" => get_table!(Table::DSIG, DSIGTable, f),
+			"name" => get_table!(Table::Name, NameTable, f),
 			_ => Err(FromFileErr::Other([].into())),
 		};
 		f.seek(SeekFrom::Start(cur.unwrap())).unwrap();
@@ -172,7 +160,8 @@ type Offset16 = u16;
 
 #[derive(Debug)]
 pub enum Table{
-	Name(NameTable)
+	Name(NameTable),
+	DSIG(DSIGTable),
 }
 
 #[derive(Debug)]
@@ -211,18 +200,14 @@ impl_from_file!(NameTable, (), (), f, {
 		},
 	});
 });
-#[derive(Debug)]
+#[derive(Debug,FromFile)]
 pub struct LangTagRecord{
 	///Language-tag string length (in bytes)
 	pub length: u16,
 	///Language-tag string offset from start of storage area (in bytes).
 	pub lang_tag_offset: Offset16,
 }
-impl_from_file!(LangTagRecord, (), (), f, {Ok(Self{
-	length: unwrap_or_ret!(u16::from_file(f)),
-	lang_tag_offset: unwrap_or_ret!(Offset16::from_file(f)),
-})});
-#[derive(Debug)]
+#[derive(Debug,FromFile)]
 pub struct NameRecord{
 	///Platform ID.
 	pub platform_id: u16,
@@ -237,14 +222,6 @@ pub struct NameRecord{
 	///String offset from start of storage area (in bytes).
 	pub string_offset: Offset16,
 }
-impl_from_file!(NameRecord, (), (), f, {Ok(Self{
-	platform_id: unwrap_or_ret!(u16::from_file(f)),
-	encoding_id: unwrap_or_ret!(u16::from_file(f)),
-	language_id: unwrap_or_ret!(u16::from_file(f)),
-	name_id: unwrap_or_ret!(u16::from_file(f)),
-	length: unwrap_or_ret!(u16::from_file(f)),
-	string_offset: unwrap_or_ret!(Offset16::from_file(f)),
-})});
 macro_rules! decode_string {($char_set: ty, $string :expr) => {
 		match CharSetStr::<$char_set>::from_bytes($string){
 			Ok(s)=>Ok(s.to_string()),
@@ -326,6 +303,30 @@ impl NameRecord{
 			x => Err(format!("{} is an invalid Platform ID", x)),
 		}
 	}
+}
+
+#[derive(Debug,FromFile)]
+pub struct DSIGTable{
+	///Version number of the DSIG table (0x00000001)
+	pub version: u32,
+	///Number of signatures in the table
+	pub num_signatures: u16,
+	///permission flags
+	/// Bit 0: cannot be resigned
+	/// Bits 1-7: Reserved (Set to 0)
+	pub flags: u16,
+	///Array of signature records
+	#[from_file_count(num_signatures)]
+	pub signature_records: Box<[SignatureRecord]>,
+}
+#[derive(Debug,FromFile)]
+pub struct SignatureRecord{
+	///Format of the signature
+	pub format: u32,
+	///Length of signature in bytes
+	pub length: u32,
+	///Offset to the signature block from the beginning of the table
+	pub signature_block_offset: Offset32
 }
 
 pub fn calc_table_checksum<T>(table: T, length: u32) -> u32 where T: Fn(usize) -> u32{

@@ -1,4 +1,4 @@
-use std::{char, collections::TryReserveError, vec::Drain, ops::{RangeBounds, Add, AddAssign, Index, Range}, fmt, cmp::min};
+use std::{char, collections::TryReserveError, vec::Drain, ops::{RangeBounds, Add, AddAssign}, fmt, cmp::min};
 
 
 pub trait CharSetChar: Clone + PartialEq{
